@@ -5,11 +5,11 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import streamlit as st
 
 from assistant import config, llm, stt
+from assistant.indexer import normalize_project_path
 from assistant.pipeline import Assistant
 from assistant.store import ProjectStore, build_index
 
@@ -17,6 +17,9 @@ st.set_page_config(
     page_title="Local Voice AI Dev Assistant",
     page_icon="🎙️",
     layout="wide",
+    # The folder picker lives in the sidebar; collapsed by default it is easy
+    # to miss that the app needs a project pointed at it at all.
+    initial_sidebar_state="expanded",
 )
 
 
@@ -79,34 +82,70 @@ with st.sidebar:
 
     # --- 2. project -------------------------------------------------
     st.subheader("2 · Project")
-    project_dir = st.text_input(
+    # The widget owns its value through `key`. Passing `value=` from
+    # session_state instead makes Streamlit rebuild the widget every time that
+    # value changes, discarding whatever the user was typing: the box snaps
+    # back to the previous path and the project folder cannot be changed.
+    st.text_input(
         "Project directory",
-        value=st.session_state["project_dir"],
+        key="project_dir",
         placeholder=r"C:\Users\you\PycharmProjects\my-project",
-        help="The folder whose code the assistant should read.",
+        help="The folder whose code the assistant should read. Paste the path "
+             "and press Index project — surrounding quotes are fine.",
     )
-    st.session_state["project_dir"] = project_dir
+    project_path = normalize_project_path(st.session_state["project_dir"])
 
-    valid_dir = bool(project_dir) and Path(project_dir).is_dir()
-    if project_dir and not valid_dir:
-        st.error("That folder does not exist.")
+    # Deliberately never disabled. A disabled button swallows the very click
+    # that enables it, so a freshly typed path needed two presses before it
+    # indexed anything — which reads as "the button does nothing". Validate
+    # on click instead.
+    if st.button("📚 Index project", width="stretch"):
+        if project_path is None:
+            st.error("Type the folder you want indexed first.")
+        elif not project_path.is_dir():
+            st.error(f"Not a folder: {project_path}")
+        else:
+            bar = st.progress(0.0, text="Starting…")
+            status = st.empty()
 
-    if st.button("📚 Index project", disabled=not valid_dir, width="stretch"):
-        bar = st.progress(0.0, text="Starting…")
-        status = st.empty()
+            def on_progress(rel_path, stats):
+                status.caption(
+                    f"{stats.files_indexed} files · {stats.chunks} chunks"
+                )
+                bar.progress(min(0.99, stats.files_indexed / 200.0),
+                             text=rel_path[-46:])
 
-        def on_progress(rel_path, stats):
-            status.caption(f"{stats.files_indexed} files · {stats.chunks} chunks")
-            bar.progress(min(0.99, stats.files_indexed / 200.0), text=rel_path[-46:])
+            with st.spinner("Indexing…"):
+                stats = build_index(project_path, store, settings=settings,
+                                    progress=on_progress)
+            bar.progress(1.0, text="Done")
+            st.session_state["index_stats"] = stats.as_dict()
+            if stats.files_indexed:
+                st.success(
+                    f"Indexed {stats.files_indexed} files → {stats.chunks} chunks"
+                )
+            else:
+                st.warning(
+                    "No indexable files found there. Check the folder, or add "
+                    "the extensions you need to SOURCE_EXTENSIONS."
+                )
 
-        with st.spinner("Indexing…"):
-            stats = build_index(project_dir, store, settings=settings,
-                                progress=on_progress)
-        bar.progress(1.0, text="Done")
-        st.session_state["index_stats"] = stats.as_dict()
-        st.success(f"Indexed {stats.files_indexed} files → {stats.chunks} chunks")
-
-    st.caption(f"Vector store holds **{store.count()}** chunks")
+    # --- what the store actually holds, and where it came from -------
+    indexed_root = store.indexed_root
+    if store.count():
+        st.caption(f"Vector store holds **{store.count()}** chunks")
+        if indexed_root:
+            st.caption(f"Indexed from `{indexed_root}`")
+        if project_path and indexed_root and (
+            str(project_path.resolve()) != indexed_root
+        ):
+            st.warning(
+                "The index was built from a different folder. Press "
+                "**Index project** to rebuild it for this one.",
+                icon="⚠️",
+            )
+    else:
+        st.caption("Vector store is empty — nothing indexed yet.")
 
     if st.button("🗑️ Clear conversation", width="stretch"):
         st.session_state["messages"] = []

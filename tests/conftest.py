@@ -68,12 +68,18 @@ class FakeStore:
         self.reset_calls = 0
         self._results = results or []
         self.last_query: str | None = None
+        self.indexed_root: str = ""
+        self.root_writes: list[str] = []
 
     def reset(self) -> None:
         self.reset_calls += 1
         self.ids.clear()
         self.documents.clear()
         self.metadatas.clear()
+
+    def set_indexed_root(self, root) -> None:
+        self.indexed_root = str(Path(root).resolve()) if root else ""
+        self.root_writes.append(self.indexed_root)
 
     def add(self, ids, documents, metadatas) -> None:
         self.ids.extend(ids)

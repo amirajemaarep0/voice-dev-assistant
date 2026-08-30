@@ -63,6 +63,25 @@ def iter_source_files(
             yield path
 
 
+def normalize_project_path(raw: str | None) -> Path | None:
+    """Turn what a user pastes into the UI into a usable path.
+
+    Windows' "Copy as path" wraps the path in double quotes, and a pasted
+    path routinely carries trailing whitespace or a newline. Left as-is,
+    those characters make an existing folder look like it does not exist.
+    Returns None when there is nothing usable to work with.
+    """
+    if not raw:
+        return None
+    text = raw.strip().strip('"').strip("'").strip()
+    if not text:
+        return None
+    try:
+        return Path(text).expanduser()
+    except (OSError, ValueError):
+        return None
+
+
 def read_text(path: Path) -> str | None:
     """Read a source file, tolerating the encodings found in the wild."""
     for encoding in ("utf-8", "utf-8-sig", "latin-1"):

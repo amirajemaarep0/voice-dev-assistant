@@ -32,7 +32,11 @@ WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 
 # --- Indexing ---------------------------------------------------------------
-CHROMA_DIR = Path(os.environ.get("CHROMA_DIR", ".chroma"))
+# Anchored to the repository root, not the working directory: `streamlit run`
+# can be launched from anywhere, and a relative path would silently create a
+# second, empty store instead of reusing the one that was already built.
+APP_ROOT = Path(__file__).resolve().parent.parent
+CHROMA_DIR = Path(os.environ.get("CHROMA_DIR") or APP_ROOT / ".chroma")
 COLLECTION_NAME = "project_context"
 
 CHUNK_SIZE = 900

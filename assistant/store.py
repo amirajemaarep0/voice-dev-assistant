@@ -6,12 +6,18 @@ install - which matters on an 8 GB machine that also has to hold an LLM.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from . import config
 from .indexer import IndexStats, chunk_id, iter_source_files, read_text, split_text
+
+# Records which folder the persisted collection was built from. Without it
+# the UI cannot tell a freshly indexed project from a stale index left over
+# from a different one - which looks exactly like "it ignores my files".
+INDEX_META_FILE = "index_meta.json"
 
 
 @dataclass
@@ -78,6 +84,27 @@ class ProjectStore:
     def count(self) -> int:
         return self._collection.count()
 
+    # --- provenance ---------------------------------------------------
+    @property
+    def _meta_path(self) -> Path:
+        return self.persist_dir / INDEX_META_FILE
+
+    @property
+    def indexed_root(self) -> str:
+        """Absolute path this collection was last built from ("" if unknown)."""
+        try:
+            data = json.loads(self._meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        return str(data.get("root", ""))
+
+    def set_indexed_root(self, root: Path | str | None) -> None:
+        payload = {"root": str(Path(root).resolve()) if root else ""}
+        try:
+            self._meta_path.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError:  # pragma: no cover - read-only persist dir
+            pass
+
     # --- read side ----------------------------------------------------
     def search(self, query: str, top_k: int = config.TOP_K) -> list[Retrieved]:
         if not query.strip() or self.count() == 0:
@@ -111,6 +138,9 @@ def build_index(
     root = Path(root)
     stats = IndexStats()
     store.reset()
+    # Cleared first, restored on success: a run that dies halfway must not
+    # leave the UI claiming the new project is fully indexed.
+    store.set_indexed_root(None)
 
     ids: list[str] = []
     docs: list[str] = []
@@ -154,4 +184,5 @@ def build_index(
             flush()
 
     flush()
+    store.set_indexed_root(root)
     return stats

@@ -62,8 +62,31 @@ streamlit run app.py
 ```
 
 1. Paste a project folder path in the sidebar and press **Index project**.
+   Quotes around the path (what Explorer's *Copy as path* gives you) and
+   stray whitespace are stripped for you.
 2. Record a question with the mic, or type it.
 3. The answer streams back with the source excerpts it was grounded in.
+
+The sidebar always shows **which folder the current index was built from**.
+If that line does not match the folder in the box, the answers are still
+coming from the previous project — press **Index project** to rebuild.
+
+### Streamlit state, and why the folder box is written the way it is
+
+Two bugs in the first version of the sidebar both came from the same place,
+and they are worth knowing about before writing any more Streamlit:
+
+- **The path could not be changed.** The box was written as
+  `st.text_input(..., value=st.session_state["project_dir"])` with no `key`.
+  Streamlit derives a widget's identity from its arguments, so every time
+  that `value` changed the widget was rebuilt from scratch and whatever the
+  user had typed was thrown away — the box snapped back to the old path.
+  The fix is to give the widget a `key` and let it own its own state.
+- **Indexing appeared to do nothing.** The button was
+  `disabled=not valid_dir`, and `valid_dir` was computed from the *previous*
+  run's value. Typing a path and clicking took two presses: the first click
+  only committed the text and enabled the button. The button is now never
+  disabled and the folder is validated when it is clicked.
 
 ## Tests
 
