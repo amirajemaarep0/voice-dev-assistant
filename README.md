@@ -74,6 +74,27 @@ pytest
 The suite runs offline: Ollama, Whisper and the vector store are all faked,
 so the tests need no model weights and no network.
 
+Two extra checks that exercise the real stack:
+
+```powershell
+python smoke_test.py    # real indexing + retrieval + one generated answer
+python verify_app.py    # executes app.py outside Streamlit to catch UI errors
+```
+
+### Measured on the dev machine
+
+| Step | Cold | Warm |
+|---|---|---|
+| Index 18 files → 100 chunks | 150 s (incl. 79 MB embedding-model download) | **5.0 s** |
+| Retrieval (top-3) | — | **0.05 s** |
+| Answer, `qwen3:1.7b`, time to first token | 104 s (reasoning pass enabled) | **12.2 s** |
+
+The generation figure is the single most important tuning result in the
+project: `qwen3` is a reasoning model and spends a long hidden "thinking"
+pass before its first visible token. Sending `"think": false` to Ollama
+removes it, cutting time-to-first-token by roughly 8×. Reasoning buys
+nothing here because the answer is already grounded in retrieved code.
+
 ## Hardware notes
 
 Developed on: Ryzen 5 6600H, 8 GB RAM, RTX 3050 Laptop (4 GB VRAM), Windows 11.

@@ -91,7 +91,7 @@ with st.sidebar:
     if project_dir and not valid_dir:
         st.error("That folder does not exist.")
 
-    if st.button("📚 Index project", disabled=not valid_dir, use_container_width=True):
+    if st.button("📚 Index project", disabled=not valid_dir, width="stretch"):
         bar = st.progress(0.0, text="Starting…")
         status = st.empty()
 
@@ -108,7 +108,7 @@ with st.sidebar:
 
     st.caption(f"Vector store holds **{store.count()}** chunks")
 
-    if st.button("🗑️ Clear conversation", use_container_width=True):
+    if st.button("🗑️ Clear conversation", width="stretch"):
         st.session_state["messages"] = []
         st.rerun()
 
