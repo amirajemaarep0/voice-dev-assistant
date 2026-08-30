@@ -163,6 +163,22 @@ TASK_INSTRUCTIONS = {
         "show the corrected line - do NOT also say the file is fine. Only "
         "if it reports no errors may you say the file parses cleanly."
     ),
+    "health": (
+        "The report above is a full scan of the project: Python's parser "
+        "for syntax, ruff for lint. Give a short verdict first (is the "
+        "project clean or not), then list the findings grouped by file, "
+        "using the exact paths and line numbers given. Do not add findings "
+        "that are not listed, and do not omit any that are."
+    ),
+    "testrun": (
+        "The test suite above was actually executed just now. Your first "
+        "sentence MUST state whether it is green or red AND quote the exact "
+        "counts from the report (how many passed, failed, errored, "
+        "skipped) - copy those digits, never round or estimate them. If it "
+        "is red, then name each failing test and explain the cause from the "
+        "failure output. Never claim a test passed or failed unless the "
+        "output says so."
+    ),
     "style": (
         "The report above is exactly what `ruff` would change - it is not a "
         "suggestion of yours. Summarise the findings in a short list, "

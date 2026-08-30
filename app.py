@@ -10,6 +10,7 @@ import streamlit as st
 
 from assistant import config, llm, picker, stt
 from assistant.indexer import normalize_project_path, project_fingerprint
+from assistant.intents import TASK_LABELS
 from assistant.pipeline import Assistant
 from assistant.store import ProjectStore, build_index
 
@@ -21,16 +22,6 @@ st.set_page_config(
     # to miss that the app needs a project pointed at it at all.
     initial_sidebar_state="expanded",
 )
-
-
-# Shown above the tool output so the user knows which check ran.
-TASK_LABELS = {
-    "syntax": "syntax check (Python parser)",
-    "style": "formatting and lint (ruff)",
-    "explain": "definition lookup",
-    "test": "definition lookup + house test style",
-    "general": "project context",
-}
 
 
 @st.cache_resource(show_spinner=False)
@@ -274,12 +265,17 @@ with st.expander("What it can do"):
     st.markdown(
         "- **Check syntax** — *what is wrong with `samples/broken_function.py`?* "
         "Uses Python's own parser, so the line and column are exact.\n"
+        "- **Scan the whole project** — *are there any errors in the whole "
+        "codebase?* Every file, syntax plus lint, in one report.\n"
+        "- **Run the tests** — *do my tests pass?* Actually executes pytest "
+        "and reports the real result, including runtime errors.\n"
         "- **Review formatting** — *how should `samples/messy_style.py` be "
         "formatted?* Reports what `ruff` would change, including the diff.\n"
         "- **Explain code** — *explain the function `normalize_project_path`* "
         "Looks up the real definition rather than a nearby chunk.\n"
         "- **Write unit tests** — *write a unit test for `average`* Matches "
-        "the conventions of the tests already in your project."
+        "the conventions of the tests already in your project.\n\n"
+        "Running the tests executes your project's own code."
     )
 
 if store.count() == 0:
@@ -338,7 +334,11 @@ if question:
             st.error("Ollama is not running. Start it with `ollama serve`.")
         else:
             try:
-                context, stream = assistant.stream_context(question)
+                # The tool phase runs before the first token: a full test
+                # run can take a while, so say what is happening rather
+                # than showing a blank bubble.
+                with st.spinner("Analysing your project…"):
+                    context, stream = assistant.stream_context(question)
                 chunks = context.chunks
 
                 # Tool output first, and labelled: these findings come from

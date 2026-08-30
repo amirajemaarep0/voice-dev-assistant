@@ -38,9 +38,21 @@ locally, so none of them require a third-party AI service:
 | Ask | What actually runs | Why it is reliable |
 |---|---|---|
 | *what is wrong with `samples/broken_function.py`?* | `ast.parse` | Python's own parser — exact line and column |
+| *are there errors in the whole codebase?* | `ast.parse` on every file + `ruff check` | Full scan, syntax and lint in one report |
+| *do my tests pass?* | `pytest` in a subprocess | The suite is really executed; exit code is the verdict |
 | *how should `samples/messy_style.py` be formatted?* | `ruff format --diff`, `ruff check` | The real diff, not a guess |
 | *explain the function `normalize_project_path`* | `ast` symbol lookup | The whole definition, not a nearby chunk |
 | *write a unit test for `average`* | symbol lookup + an existing test file | Matches your project's test conventions |
+
+Running the tests **executes your project's own code** — that is the only
+way to surface a genuine runtime error, such as a `NameError` in a branch
+no static check reaches. It runs only when you ask, with a timeout.
+
+One limitation worth knowing: the suite is run with *this* project's Python
+interpreter. If the project you indexed has its own virtual environment and
+dependencies, its imports will fail and you will see that in the failure
+output rather than a real test result. Syntax, lint and explanation work on
+any project; running the tests assumes a shared environment.
 
 The key design decision is that **the model is never asked to find these
 things** — only to explain findings that are already correct. This matters
@@ -159,6 +171,42 @@ Two extra checks that exercise the real stack:
 python smoke_test.py    # real indexing + retrieval + one generated answer
 python verify_app.py    # executes app.py outside Streamlit to catch UI errors
 ```
+
+### Measuring answer accuracy
+
+`evaluate.py` scores the assistant against cases that state what a correct
+answer must contain **and what it must not**. The second half is the one
+that matters: the failures worth catching are not missing detail, they are
+confident statements that contradict the tools — "the file parses cleanly"
+printed directly underneath a syntax error.
+
+```powershell
+python evaluate.py                    # score the default model
+python evaluate.py llama3:latest      # compare another model
+python evaluate.py --facts-only       # score the tool layer alone, no LLM
+python evaluate.py --with-excerpts    # restore the pre-fix prompt, to compare
+```
+
+It scores three layers separately, because they fail for different reasons:
+intent classification, tool findings, and the model's prose. Only the last
+is affected by prompting.
+
+**The measured result that drove a design change.** Answers were noticeably
+unreliable, and separating the layers showed why: the tool layer was already
+perfect, so the fault was entirely in the prompt. Tool-driven questions were
+still being sent the top-k retrieved excerpts, and that unrelated code was
+what the small model latched onto — in one run it justified a claim by
+citing a test that had nothing to do with the question.
+
+| Prompt for tool-driven questions | Correct answers (`qwen3:1.7b`, 13 cases) |
+|---|---|
+| Tool findings **+ retrieved excerpts** (original) | 9 / 13 |
+| Tool findings **only** | 12 / 13 |
+
+Reproduce with `python evaluate.py --with-excerpts` versus plain
+`python evaluate.py`. Retrieval still runs for questions that need it —
+explaining code and writing tests keep their excerpts; only the tasks whose
+answer is fully determined by tool output have them stripped.
 
 The project passes its own linter — the one it offers to run on your code:
 

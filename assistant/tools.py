@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -23,6 +24,9 @@ from pathlib import Path
 MAX_SYMBOL_MATCHES = 3
 RUFF_SELECT = "E,W,F,I"
 RUFF_TIMEOUT = 20.0
+# A student project's suite; long enough for a real one, short enough
+# that a hung test does not freeze the UI.
+TEST_TIMEOUT = 180.0
 
 
 # --------------------------------------------------------------- syntax
@@ -294,6 +298,155 @@ def style_report(
         report.available = False
         report.error = str(exc)
     return report
+
+
+def lint_project(
+    root: Path | str,
+    max_issues: int = 40,
+) -> tuple[list[str], bool, str]:
+    """Run ruff's linter over the whole project.
+
+    Returns (issues, ruff_available, error). Issues are "path:line: CODE
+    message", which is what the model needs to group and explain them.
+
+    F-rules are the interesting ones for the "spot errors" question: F821
+    is an undefined name, F811 a redefinition, F401 an unused import -
+    the static half of what would otherwise be a runtime failure.
+    """
+    root = Path(root)
+    try:
+        _, out, err = _run_ruff(
+            ["check", "--select", RUFF_SELECT, "--output-format", "json", str(root)]
+        )
+        items = json.loads(out or "[]")
+    except FileNotFoundError as exc:  # pragma: no cover - python without ruff
+        return [], False, str(exc)
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+        return [], False, str(exc)
+
+    issues: list[str] = []
+    for item in items:
+        location = item.get("location") or {}
+        filename = item.get("filename", "")
+        try:
+            rel = str(Path(filename).relative_to(root)).replace("\\", "/")
+        except ValueError:
+            rel = filename
+        issues.append(
+            f"{rel}:{location.get('row', '?')}: "
+            f"{item.get('code', '?')} {item.get('message', '')}"
+        )
+    issues.sort()
+    return issues[:max_issues], True, err.strip() if not items else ""
+
+
+# --------------------------------------------------------------- tests
+@dataclass
+class TestRun:
+    """The outcome of running the project's test suite."""
+
+    ran: bool = False
+    returncode: int = -1
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    skipped: int = 0
+    summary: str = ""
+    failures: str = ""
+    error: str = ""
+
+    @property
+    def is_green(self) -> bool:
+        """pytest's exit code is the authority, not the parsed counts.
+
+        0 means every collected test passed. Counting words in the summary
+        line is a convenience for the message; it breaks the moment a
+        project's own `addopts` changes the verbosity.
+        """
+        return self.ran and self.returncode == 0
+
+    def as_text(self) -> str:
+        if not self.ran:
+            return f"TEST RUN: could not run the tests - {self.error}"
+        head = (
+            f"TEST RUN: {self.passed} passed, {self.failed} failed, "
+            f"{self.errors} errors, {self.skipped} skipped."
+        )
+        if self.summary:
+            head += f"\npytest reported: {self.summary}"
+        if self.is_green:
+            return (
+                f"{head}\nThe suite is GREEN - all {self.passed} tests passed."
+            )
+        return (
+            f"{head}\nThe suite is RED.\n\nFailure output:\n{self.failures}"
+        ).strip()
+
+
+_COUNT = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|xfailed)")
+
+
+def run_tests(
+    root: Path | str,
+    timeout: float = TEST_TIMEOUT,
+    max_output: int = 4000,
+) -> TestRun:
+    """Run pytest in `root` and summarise what happened.
+
+    This executes the project's own code, which is the only way to surface
+    a genuine runtime error - a NameError inside a branch no static check
+    reaches. It is the user's code on the user's machine, run only when
+    they ask, with a timeout and no network isolation beyond that.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return TestRun(error=f"not a folder: {root}")
+
+    try:
+        proc = subprocess.run(
+            # `-o addopts=` clears the project's own addopts first. Without
+            # it a pytest.ini that already sets `-q` combines with ours into
+            # `-qq`, which suppresses the summary line entirely.
+            [sys.executable, "-m", "pytest", "-o", "addopts=", "-q",
+             "--no-header", "-p", "no:cacheprovider", "--tb=short"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return TestRun(error=f"the test run exceeded {timeout:.0f}s and was stopped")
+    except (subprocess.SubprocessError, OSError) as exc:
+        return TestRun(error=str(exc))
+
+    output = (proc.stdout or "") + (proc.stderr or "")
+    if "No module named pytest" in output:
+        return TestRun(error="pytest is not installed in this environment")
+
+    run = TestRun(ran=True, returncode=proc.returncode)
+    tail = output.strip().splitlines()[-1] if output.strip() else ""
+    run.summary = tail
+    for count, kind in _COUNT.findall(output):
+        value = int(count)
+        if kind == "passed":
+            run.passed = value
+        elif kind == "failed":
+            run.failed = value
+        elif kind.startswith("error"):
+            run.errors = value
+        elif kind == "skipped":
+            run.skipped = value
+
+    if proc.returncode == 5:
+        return TestRun(ran=False, returncode=5, summary=tail,
+                       error="no tests were collected in this project")
+    if not run.is_green:
+        # Everything from the failures banner on is what explains the break.
+        marker = output.find("=== FAILURES ===")
+        if marker == -1:
+            marker = output.find("=== ERRORS ===")
+        run.failures = (output[marker:] if marker != -1 else output)[:max_output]
+    return run
 
 
 def resolve_in_project(root: Path | str, source: str) -> Path | None:

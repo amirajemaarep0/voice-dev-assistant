@@ -54,6 +54,32 @@ class TestDetectIntent:
     def test_explain_requests(self, question):
         assert intents.detect_intent(question).kind == intents.EXPLAIN
 
+    @pytest.mark.parametrize("question", [
+        "run the tests",
+        "run my unit tests",
+        "do my tests pass?",
+        "are the tests passing?",
+        "run pytest",
+        "does the test suite pass",
+    ])
+    def test_running_tests_is_not_writing_them(self, question):
+        assert intents.detect_intent(question).kind == intents.TESTRUN
+
+    @pytest.mark.parametrize("question", [
+        "check the whole project for syntax mistakes",
+        "are there any errors in the whole codebase?",
+        "scan every file",
+        "give me a health check",
+        "list all the errors",
+    ])
+    def test_project_wide_requests(self, question):
+        assert intents.detect_intent(question).kind == intents.HEALTH
+
+    def test_a_single_named_file_is_not_project_wide(self):
+        assert intents.detect_intent(
+            "is there a syntax error in app.py?"
+        ).kind == intents.SYNTAX
+
     @pytest.mark.parametrize("question", ["", "   ", "app.py", "hello"])
     def test_falls_back_to_general(self, question):
         assert intents.detect_intent(question).kind == intents.GENERAL
@@ -74,9 +100,22 @@ class TestExtractSymbol:
         ("what does read_text() return?", "read_text"),
         ("write a unit test for average", "average"),
         ("describe the class ProjectStore", "ProjectStore"),
+        # The cue noun can come after the name as well as before it.
+        ("what does the Retrieved class do?", "Retrieved"),
+        ("describe the Assistant class", "Assistant"),
+        ("explain the Retrieved dataclass", "Retrieved"),
+        ("what does the build_index function do?", "build_index"),
     ])
     def test_finds_the_identifier(self, question, expected):
         assert intents.extract_symbol(question) == expected
+
+    @pytest.mark.parametrize("question", [
+        "explain the following function",
+        "describe the main module",
+        "what does the whole project do?",
+    ])
+    def test_filler_words_are_not_symbols(self, question):
+        assert intents.extract_symbol(question) == ""
 
     @pytest.mark.parametrize("question", [
         "what is in app.py?",
@@ -99,3 +138,23 @@ class TestExtractSymbol:
 
     def test_syntax_intent_carries_no_symbol(self):
         assert intents.detect_intent("syntax error in add_numbers?").symbol == ""
+
+
+class TestTaskLabels:
+    """The UI looks a label up by intent kind; a missing one crashes it."""
+
+    def test_every_kind_has_a_label(self):
+        for kind in intents.ALL_KINDS:
+            assert kind in intents.TASK_LABELS
+
+    def test_no_stray_labels(self):
+        assert set(intents.TASK_LABELS) == set(intents.ALL_KINDS)
+
+    def test_every_detected_kind_is_declared(self):
+        questions = [
+            "run the tests", "check the whole project", "explain add",
+            "write a unit test for add", "syntax error in app.py?",
+            "reformat app.py", "hello",
+        ]
+        for question in questions:
+            assert intents.detect_intent(question).kind in intents.ALL_KINDS

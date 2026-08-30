@@ -20,11 +20,27 @@ SYNTAX = "syntax"
 STYLE = "style"
 EXPLAIN = "explain"
 TEST = "test"
+TESTRUN = "testrun"
+HEALTH = "health"
 GENERAL = "general"
 
 # Ordered: the first pattern that matches wins, so the more specific
 # intents are listed before the ones whose wording overlaps them.
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    # "run the tests" must beat "write a test", and both must beat the
+    # generic syntax wording, which shares words with all of them.
+    (TESTRUN, re.compile(
+        r"\b(run|execute|launch)\s+(the\s+|my\s+|all\s+)?(unit\s+)?tests?\b|"
+        r"\b(do|does)\s+(the\s+|my\s+|all\s+)?tests?\s+(pass|fail|work)\b|"
+        r"\btests?\s+(pass|passing|fail|failing|green|red)\b|"
+        r"\brun\s+pytest\b|\btest\s+suite\s+(pass|fail|status|result)",
+        re.I)),
+    (HEALTH, re.compile(
+        r"\b(whole|entire|all\s+(the\s+)?|every)\s*(project|codebase|files?)\b|"
+        r"\bproject[- ]wide\b|\bhealth\s*(check|report)\b|"
+        r"\b(check|scan|audit)\s+(the\s+)?(whole|entire|all)\b|"
+        r"\ball\s+(the\s+)?(syntax\s+)?(errors?|mistakes?|problems?|issues?)\b",
+        re.I)),
     (TEST, re.compile(
         r"\b(unit\s*test|write\s+(a\s+)?test|generate\s+(a\s+)?test|"
         r"create\s+(a\s+)?test|test\s+case|pytest)\b", re.I)),
@@ -44,8 +60,16 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # A quoted or back-ticked name, or a bare identifier after a cue word.
 _QUOTED = re.compile(r"[`'\"]([A-Za-z_][\w.]*)[`'\"]")
 _CUED = re.compile(
-    r"\b(?:function|method|class|variable|symbol|def|test\s+for)\s+"
+    r"\b(?:function|method|class|dataclass|variable|symbol|def|test\s+for)\s+"
     r"([A-Za-z_][\w.]*)",
+    re.I,
+)
+# The same cue with the words the other way round: "the Retrieved class",
+# "the build_index function". English puts the noun on either side and only
+# one order was handled, so class names went unresolved.
+_CUED_BEFORE = re.compile(
+    r"\b([A-Za-z_][\w.]*)\s+"
+    r"(?:function|method|class|dataclass|variable|module)\b",
     re.I,
 )
 _CALL = re.compile(r"\b([A-Za-z_][\w.]*)\s*\(\s*\)")
@@ -56,6 +80,24 @@ _STOPWORDS = {
     "does", "do", "what", "how", "explain", "file", "code", "project",
     "function", "method", "class", "variable", "test", "tests", "unit",
     "py", "python", "me", "my", "please", "you", "can",
+    "following", "same", "whole", "entire", "main", "above", "below",
+    "each", "every", "any", "some", "its", "their", "which", "and",
+}
+
+
+ALL_KINDS = (SYNTAX, STYLE, EXPLAIN, TEST, TESTRUN, HEALTH, GENERAL)
+
+# What the UI shows above the tool output, so the user knows which check
+# ran. Kept here, next to the kinds, so a new intent cannot be added
+# without a label - looking one up in the UI would crash the answer.
+TASK_LABELS = {
+    SYNTAX: "syntax check (Python parser)",
+    HEALTH: "whole-project scan (parser + ruff)",
+    TESTRUN: "test suite executed (pytest)",
+    STYLE: "formatting and lint (ruff)",
+    EXPLAIN: "definition lookup",
+    TEST: "definition lookup + house test style",
+    GENERAL: "project context",
 }
 
 
@@ -96,7 +138,7 @@ def extract_symbol(question: str) -> str:
     """
     if not question:
         return ""
-    for pattern in (_QUOTED, _CUED, _CALL):
+    for pattern in (_QUOTED, _CUED, _CUED_BEFORE, _CALL):
         for match in pattern.finditer(question):
             candidate = match.group(1).strip(".")
             if _is_identifier_like(candidate):

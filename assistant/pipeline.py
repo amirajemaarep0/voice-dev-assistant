@@ -16,6 +16,16 @@ from .store import ProjectStore, Retrieved
 # How much of an existing test file to show the model as a style example.
 STYLE_EXAMPLE_CHARS = 1400
 
+# Tasks whose answer comes entirely from tool output. Retrieved excerpts add
+# nothing here and measurably hurt: they give a small model unrelated code to
+# talk about instead of the finding it was handed.
+FACTS_ONLY = frozenset({
+    intents.SYNTAX,
+    intents.STYLE,
+    intents.HEALTH,
+    intents.TESTRUN,
+})
+
 
 @dataclass
 class Context:
@@ -188,6 +198,41 @@ class Assistant:
                     )
         return ""
 
+    def _health_facts(self) -> str:
+        """Everything statically wrong with the project, in one report."""
+        if not self.root:
+            return ""
+        parts: list[str] = []
+
+        syntax = tools.check_project(self.root)
+        if syntax:
+            body = "\n\n".join(i.as_text() for i in syntax[:8])
+            more = "" if len(syntax) <= 8 else f"\n\n(+{len(syntax) - 8} more)"
+            parts.append(
+                f"SYNTAX ERRORS ({len(syntax)} file(s) will not parse):\n"
+                f"{body}{more}"
+            )
+        else:
+            parts.append("SYNTAX: every Python file in the project parses.")
+
+        issues, available, error = tools.lint_project(self.root)
+        if not available:
+            parts.append(f"LINT: unavailable ({error})")
+        elif issues:
+            parts.append(
+                f"LINT FINDINGS ({len(issues)} shown, ruff E/W/F/I):\n"
+                + "\n".join(issues)
+            )
+        else:
+            parts.append("LINT: ruff reports no findings.")
+        return "\n\n".join(parts)
+
+    def _testrun_facts(self) -> str:
+        """Actually run the suite - the only way to see a runtime error."""
+        if not self.root:
+            return ""
+        return tools.run_tests(self.root).as_text()
+
     def build_context(self, question: str) -> Context:
         """Classify the question, then assemble exactly what it needs."""
         intent = intents.detect_intent(question)
@@ -198,6 +243,10 @@ class Assistant:
         symbols: list[tools.Symbol] = []
         if intent.kind == intents.SYNTAX:
             facts = self._syntax_facts(named)
+        elif intent.kind == intents.HEALTH:
+            facts = self._health_facts()
+        elif intent.kind == intents.TESTRUN:
+            facts = self._testrun_facts()
         elif intent.kind == intents.STYLE:
             facts = self._style_facts(named)
         elif intent.needs_symbol and intent.symbol:
@@ -212,6 +261,13 @@ class Assistant:
                 c for c in chunks
                 if not (c.source == symbol.file and symbol.source in c.text)
             ]
+
+        # For a tool-driven question the retrieved excerpts are noise: the
+        # answer is entirely determined by the tool output, and unrelated
+        # code in the prompt is what makes a small model wander off and
+        # cite tests that have nothing to do with the question.
+        if facts and intent.kind in FACTS_ONLY:
+            chunks = []
 
         return Context(
             question=question,
