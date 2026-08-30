@@ -1,0 +1,21 @@
+# Local Voice AI Dev Assistant - pinned for Python 3.11 on Windows
+# Deliberately torch-free: embeddings run on onnxruntime, STT on CTranslate2.
+
+# UI
+streamlit>=1.41,<2.0
+
+# Vector store + embeddings (all-MiniLM-L6-v2 via ONNX, bundled with chromadb)
+chromadb>=0.5.5,<0.7
+
+# Code-aware chunking (LangChain, text-splitters only - no heavy deps)
+langchain-text-splitters>=0.3,<0.4
+
+# Local speech-to-text (Whisper weights, CTranslate2 runtime)
+faster-whisper>=1.0.3
+
+# Ollama HTTP client
+requests>=2.32
+
+# Tests
+pytest>=8.0
+pytest-mock>=3.14

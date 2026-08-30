@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Project data: NEVER commit these ---
+# Vector store (rebuildable, can reach hundreds of MB)
+.chroma/
+chroma_db/
+# Cached Whisper weights
+models/
+*.gguf
+*.bin
+*.onnx
+# Recorded audio
+recordings/
+*.wav
+
+# --- Logs / scratch ---
+*.log
+smoke_clean.log
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Local config with machine-specific paths ---
+.env
+config.local.json
