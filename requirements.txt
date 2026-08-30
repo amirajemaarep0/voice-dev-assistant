@@ -16,6 +16,10 @@ faster-whisper>=1.0.3
 # Ollama HTTP client
 requests>=2.32
 
+# Formatting and lint findings for the "how should this be formatted?" task.
+# A single self-contained binary - no plugin ecosystem to install.
+ruff>=0.6
+
 # Tests
 pytest>=8.0
 pytest-mock>=3.14

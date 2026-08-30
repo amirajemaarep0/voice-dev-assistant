@@ -10,7 +10,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Iterator
+from typing import Iterable, Iterator
 
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 
@@ -51,7 +51,10 @@ def iter_source_files(
     import os
 
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in ignored and not d.startswith(".")]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in ignored and not d.startswith(".")
+        ]
         for name in sorted(filenames):
             path = Path(dirpath) / name
             if path.suffix.lower() not in exts:
@@ -106,7 +109,10 @@ def extract_file_references(
         else:
             # "test_store.py" should find "tests/test_store.py"; a written
             # sub-path like "tests/test_store.py" must still match exactly.
-            suffix_hits = [s for s in sources if _normalize_source(s).endswith("/" + token)]
+            suffix_hits = [
+                s for s in sources
+                if _normalize_source(s).endswith("/" + token)
+            ]
             hits = suffix_hits or by_basename.get(token.rsplit("/", 1)[-1], [])
 
         if hits:

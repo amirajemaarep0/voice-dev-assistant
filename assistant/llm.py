@@ -47,7 +47,9 @@ def _is_local(model_name: str, entry: dict | None = None) -> bool:
     return "-cloud" not in model_name and not model_name.endswith("cloud")
 
 
-def list_local_models(host: str = config.OLLAMA_HOST, timeout: float = 5.0) -> list[str]:
+def list_local_models(
+    host: str = config.OLLAMA_HOST, timeout: float = 5.0
+) -> list[str]:
     """Return installed, genuinely on-device model names."""
     try:
         resp = requests.get(f"{host}/api/tags", timeout=timeout)
@@ -104,10 +106,24 @@ def build_prompt(
     question: str,
     chunks: Iterable[Retrieved],
     missing_files: Iterable[str] | None = None,
+    facts: str = "",
+    task: str = "general",
 ) -> str:
     """Assemble the final user prompt. Pure function - unit tested."""
     chunks = list(chunks)
     missing = list(missing_files or [])
+
+    # Deterministic findings go first and are labelled as measured, not
+    # inferred: the model must not "correct" them from the excerpts.
+    head = ""
+    if facts:
+        head = (
+            "The following was produced by running real tools on the "
+            "user's files. It is factual and takes precedence over "
+            f"anything you infer from the excerpts.\n\n{facts}\n\n"
+        )
+    instruction = TASK_INSTRUCTIONS.get(task, "")
+    tail = f"\n\n{instruction}" if instruction else ""
 
     # A named file that is not in the index has a specific, actionable cause:
     # it was added after the last index, or it lives outside the indexed
@@ -122,15 +138,65 @@ def build_prompt(
         )
 
     if not chunks:
+        if facts:
+            return f"{head}Question: {question}{note}{tail}"
         return (
             f"{question}\n\n"
             "(No relevant code was found in the indexed project. Say so, and "
-            f"ask for the file or symbol name.){note}"
+            f"ask for the file or symbol name.){note}{tail}"
         )
     return (
+        f"{head}"
         "Here are the most relevant excerpts from the user's project:\n\n"
         f"{format_context(chunks)}\n\n"
-        f"Question: {question}{note}"
+        f"Question: {question}{note}{tail}"
+    )
+
+
+# What to do with the deterministic findings, per task. The findings are
+# already correct; these say how to present them.
+TASK_INSTRUCTIONS = {
+    "syntax": (
+        "The syntax check above came from Python's own parser and is "
+        "authoritative. If it lists errors, report each one at the exact "
+        "line given, explain in one sentence why Python rejects it, and "
+        "show the corrected line - do NOT also say the file is fine. Only "
+        "if it reports no errors may you say the file parses cleanly."
+    ),
+    "style": (
+        "The report above is exactly what `ruff` would change - it is not a "
+        "suggestion of yours. Summarise the findings in a short list, "
+        "grouped by what kind of problem they are, and show the corrected "
+        "code for the most important one. Do not invent findings."
+    ),
+    "explain": (
+        "Explain what the definition above does: its purpose in one "
+        "sentence, then its parameters, its return value, and anything "
+        "non-obvious about how it works. Refer only to code shown."
+    ),
+    "test": (
+        "Write a pytest test for the definition above. Match the house "
+        "style shown: same import layout, same class/function naming, same "
+        "assertion style. Cover the normal case and at least one edge case. "
+        "Output the test code in one ```python block, then one short line "
+        "saying what each test covers. Do not test behaviour the code does "
+        "not have."
+    ),
+}
+
+
+def build_prompt_for(context) -> str:
+    """Assemble the prompt for a classified question.
+
+    Takes a `pipeline.Context`. Kept here so prompt assembly - the part
+    worth inspecting when an answer goes wrong - lives in one file.
+    """
+    return build_prompt(
+        context.question,
+        context.chunks,
+        missing_files=context.missing_files,
+        facts=context.facts,
+        task=context.intent.kind,
     )
 
 

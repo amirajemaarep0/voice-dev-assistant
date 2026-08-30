@@ -24,8 +24,34 @@ project files ──► chunk ──► embed ──┘        (Chroma)         
 | Vector store | `assistant/store.py` | Chroma persistence, embedding, similarity search |
 | LLM | `assistant/llm.py` | Ollama HTTP client, system prompt, prompt assembly |
 | STT | `assistant/stt.py` | Whisper transcription (faster-whisper / CTranslate2) |
-| Orchestration | `assistant/pipeline.py` | Question → retrieve → prompt → streamed answer |
+| Code tools | `assistant/tools.py` | Syntax check (`ast`), symbol lookup, ruff report |
+| Intent | `assistant/intents.py` | Classify the question into a coding task |
+| Folder picker | `assistant/picker.py` | Native dialog + in-app directory browser |
+| Orchestration | `assistant/pipeline.py` | Question → classify → tools + retrieve → answer |
 | Interface | `app.py` | Streamlit UI: folder picker, mic, chat, sources |
+
+## What it does
+
+Beyond answering questions about the code, it performs four developer tasks
+locally, so none of them require a third-party AI service:
+
+| Ask | What actually runs | Why it is reliable |
+|---|---|---|
+| *what is wrong with `samples/broken_function.py`?* | `ast.parse` | Python's own parser — exact line and column |
+| *how should `samples/messy_style.py` be formatted?* | `ruff format --diff`, `ruff check` | The real diff, not a guess |
+| *explain the function `normalize_project_path`* | `ast` symbol lookup | The whole definition, not a nearby chunk |
+| *write a unit test for `average`* | symbol lookup + an existing test file | Matches your project's test conventions |
+
+The key design decision is that **the model is never asked to find these
+things** — only to explain findings that are already correct. This matters
+because the model is small: asked directly what was wrong with
+`print(" HAMDI"`, `qwen3:1.7b` quoted the line back with the bracket closed
+and declared the file fine. Handed the parser's output, it reports the error
+at the right line and shows the fix. The UI labels tool output *"exact, not
+generated"* so the two are never confused.
+
+`samples/` holds two deliberately faulty files kept as demo targets — one
+with a syntax error, one badly formatted.
 
 ## Design decisions worth defending
 
@@ -74,11 +100,18 @@ ollama pull qwen3:1.7b
 streamlit run app.py
 ```
 
-1. Paste a project folder path in the sidebar and press **Index project**.
-   Quotes around the path (what Explorer's *Copy as path* gives you) and
-   stray whitespace are stripped for you.
-2. Record a question with the mic, or type it.
-3. The answer streams back with the source excerpts it was grounded in.
+1. Choose the project folder, three ways — whichever suits:
+   - **📂 Browse…** opens the normal Windows folder dialog. The Streamlit
+     server *is* your machine, so a native `tkinter` dialog is legitimate
+     here. It opens on the desktop, in front of the browser.
+   - **🗂 Folder list** browses directories inside the app instead. Always
+     works, including where no desktop dialog can open.
+   - **Paste the path** into the box. Quotes around it (what Explorer's
+     *Copy as path* gives you) and stray whitespace are stripped for you.
+2. Press **Index project**.
+3. Record a question with the mic, or type it.
+4. The answer streams back, with any tool findings shown separately from the
+   model's prose and the source excerpts it was grounded in.
 
 The sidebar always shows **which folder the current index was built from**.
 If that line does not match the folder in the box, the answers are still
@@ -126,6 +159,15 @@ Two extra checks that exercise the real stack:
 python smoke_test.py    # real indexing + retrieval + one generated answer
 python verify_app.py    # executes app.py outside Streamlit to catch UI errors
 ```
+
+The project passes its own linter — the one it offers to run on your code:
+
+```powershell
+python -m ruff check --select E,W,F,I assistant/ app.py tests/
+```
+
+`samples/` is deliberately excluded from that claim; those files are broken
+on purpose.
 
 ### Measured on the dev machine
 
