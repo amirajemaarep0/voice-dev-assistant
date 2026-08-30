@@ -9,7 +9,7 @@ import hashlib
 import streamlit as st
 
 from assistant import config, llm, stt
-from assistant.indexer import normalize_project_path
+from assistant.indexer import normalize_project_path, project_fingerprint
 from assistant.pipeline import Assistant
 from assistant.store import ProjectStore, build_index
 
@@ -27,6 +27,19 @@ st.set_page_config(
 def get_store(persist_dir: str) -> ProjectStore:
     """One Chroma client per persist directory, reused across reruns."""
     return ProjectStore(persist_dir=persist_dir)
+
+
+@st.cache_data(ttl=5, show_spinner=False)
+def current_fingerprint(root: str) -> str:
+    """Signature of the files on disk right now.
+
+    Cached briefly because Streamlit reruns the whole script on every
+    interaction and this walks the project tree.
+    """
+    try:
+        return project_fingerprint(root)
+    except OSError:
+        return ""
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -133,9 +146,13 @@ with st.sidebar:
     # --- what the store actually holds, and where it came from -------
     indexed_root = store.indexed_root
     if store.count():
-        st.caption(f"Vector store holds **{store.count()}** chunks")
+        st.caption(
+            f"Vector store holds **{store.count()}** chunks "
+            f"from **{len(store.sources())}** files"
+        )
         if indexed_root:
             st.caption(f"Indexed from `{indexed_root}`")
+
         if project_path and indexed_root and (
             str(project_path.resolve()) != indexed_root
         ):
@@ -143,6 +160,17 @@ with st.sidebar:
                 "The index was built from a different folder. Press "
                 "**Index project** to rebuild it for this one.",
                 icon="⚠️",
+            )
+        elif indexed_root and current_fingerprint(indexed_root) != (
+            store.indexed_fingerprint
+        ):
+            # Files were added, edited or deleted since the index was built.
+            # Without this the assistant simply cannot see a new file, and
+            # says it is "not in the excerpts" with no hint why.
+            st.warning(
+                "Files have changed on disk since this index was built. "
+                "Press **Index project** to pick them up.",
+                icon="🔄",
             )
     else:
         st.caption("Vector store is empty — nothing indexed yet.")

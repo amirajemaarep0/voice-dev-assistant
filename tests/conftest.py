@@ -69,6 +69,7 @@ class FakeStore:
         self._results = results or []
         self.last_query: str | None = None
         self.indexed_root: str = ""
+        self.indexed_fingerprint: str = ""
         self.root_writes: list[str] = []
 
     def reset(self) -> None:
@@ -77,9 +78,31 @@ class FakeStore:
         self.documents.clear()
         self.metadatas.clear()
 
-    def set_indexed_root(self, root) -> None:
+    def set_indexed_root(self, root, fingerprint: str = "") -> None:
         self.indexed_root = str(Path(root).resolve()) if root else ""
+        self.indexed_fingerprint = fingerprint if root else ""
         self.root_writes.append(self.indexed_root)
+
+    def sources(self) -> list[str]:
+        """Distinct file paths, from indexed metadata or canned results."""
+        known = {m["source"] for m in self.metadatas}
+        known.update(r.source for r in self._results)
+        return sorted(known)
+
+    def chunks_for_source(self, source: str, limit: int = 8) -> list[Retrieved]:
+        indexed = [
+            Retrieved(text=doc, source=meta["source"],
+                      position=meta["position"], distance=0.0)
+            for doc, meta in zip(self.documents, self.metadatas)
+            if meta["source"] == source
+        ]
+        canned = [
+            Retrieved(text=r.text, source=r.source, position=r.position,
+                      distance=0.0)
+            for r in self._results
+            if r.source == source
+        ]
+        return (indexed or canned)[:limit]
 
     def add(self, ids, documents, metadatas) -> None:
         self.ids.extend(ids)

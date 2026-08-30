@@ -22,6 +22,9 @@ Rules:
 - Ground every claim in the excerpts. If they do not contain the answer, say \
 so plainly and name what file you would need to see.
 - Cite the file you are drawing on, like [src/app.py].
+- Quote the user's code exactly as it appears, including anything that looks \
+like a mistake. Never silently repair a typo, a missing bracket or a broken \
+line while quoting it: reporting the defect IS the answer they asked for.
 - Be concise. The answer is read aloud or skimmed while the user codes.
 - When asked to write code (a test, a refactor), match the style and imports \
 already visible in the excerpts."""
@@ -97,19 +100,37 @@ def format_context(chunks: Iterable[Retrieved]) -> str:
     return "\n\n".join(parts)
 
 
-def build_prompt(question: str, chunks: Iterable[Retrieved]) -> str:
+def build_prompt(
+    question: str,
+    chunks: Iterable[Retrieved],
+    missing_files: Iterable[str] | None = None,
+) -> str:
     """Assemble the final user prompt. Pure function - unit tested."""
     chunks = list(chunks)
+    missing = list(missing_files or [])
+
+    # A named file that is not in the index has a specific, actionable cause:
+    # it was added after the last index, or it lives outside the indexed
+    # folder. Saying that beats "the excerpts do not mention it".
+    note = ""
+    if missing:
+        names = ", ".join(missing)
+        note = (
+            f"\n\nNOTE: the question names {names}, which is NOT in the "
+            "indexed project. Say so directly and tell the user to re-index "
+            "if they have just created or moved it. Do not guess its contents."
+        )
+
     if not chunks:
         return (
             f"{question}\n\n"
             "(No relevant code was found in the indexed project. Say so, and "
-            "ask for the file or symbol name.)"
+            f"ask for the file or symbol name.){note}"
         )
     return (
         "Here are the most relevant excerpts from the user's project:\n\n"
         f"{format_context(chunks)}\n\n"
-        f"Question: {question}"
+        f"Question: {question}{note}"
     )
 
 

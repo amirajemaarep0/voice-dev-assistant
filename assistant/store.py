@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Callable
 
 from . import config
-from .indexer import IndexStats, chunk_id, iter_source_files, read_text, split_text
+from .indexer import (
+    IndexStats,
+    chunk_id,
+    iter_source_files,
+    project_fingerprint,
+    read_text,
+    split_text,
+)
 
 # Records which folder the persisted collection was built from. Without it
 # the UI cannot tell a freshly indexed project from a stale index left over
@@ -89,23 +96,65 @@ class ProjectStore:
     def _meta_path(self) -> Path:
         return self.persist_dir / INDEX_META_FILE
 
+    def _meta(self) -> dict:
+        try:
+            return json.loads(self._meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
     @property
     def indexed_root(self) -> str:
         """Absolute path this collection was last built from ("" if unknown)."""
-        try:
-            data = json.loads(self._meta_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-        return str(data.get("root", ""))
+        return str(self._meta().get("root", ""))
 
-    def set_indexed_root(self, root: Path | str | None) -> None:
-        payload = {"root": str(Path(root).resolve()) if root else ""}
+    @property
+    def indexed_fingerprint(self) -> str:
+        """The project fingerprint captured when the index was built."""
+        return str(self._meta().get("fingerprint", ""))
+
+    def set_indexed_root(
+        self, root: Path | str | None, fingerprint: str = ""
+    ) -> None:
+        payload = {
+            "root": str(Path(root).resolve()) if root else "",
+            "fingerprint": fingerprint if root else "",
+        }
         try:
             self._meta_path.write_text(json.dumps(payload), encoding="utf-8")
         except OSError:  # pragma: no cover - read-only persist dir
             pass
 
     # --- read side ----------------------------------------------------
+    def sources(self) -> list[str]:
+        """Every distinct file path currently in the collection."""
+        if self.count() == 0:
+            return []
+        got = self._collection.get(include=["metadatas"])
+        return sorted({str(m.get("source", "")) for m in got["metadatas"] if m})
+
+    def chunks_for_source(
+        self, source: str, limit: int = config.FILE_CHUNK_LIMIT
+    ) -> list[Retrieved]:
+        """Every chunk of one file, in order.
+
+        Distance is 0.0: this is an exact metadata match, not a similarity
+        hit, and the UI should not present it as one.
+        """
+        got = self._collection.get(
+            where={"source": source}, include=["documents", "metadatas"]
+        )
+        out = [
+            Retrieved(
+                text=doc,
+                source=str(meta.get("source", source)),
+                position=int(meta.get("position", 0)),
+                distance=0.0,
+            )
+            for doc, meta in zip(got["documents"], got["metadatas"])
+        ]
+        out.sort(key=lambda r: r.position)
+        return out[:limit]
+
     def search(self, query: str, top_k: int = config.TOP_K) -> list[Retrieved]:
         if not query.strip() or self.count() == 0:
             return []
@@ -184,5 +233,7 @@ def build_index(
             flush()
 
     flush()
-    store.set_indexed_root(root)
+    store.set_indexed_root(
+        root, fingerprint=project_fingerprint(root, settings.extensions)
+    )
     return stats

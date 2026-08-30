@@ -37,6 +37,19 @@ project files ──► chunk ──► embed ──┘        (Chroma)         
 - **Language-aware chunking** (`RecursiveCharacterTextSplitter.from_language`).
   Naive character splitting cuts functions in half; splitting on syntactic
   boundaries measurably improves retrieval relevance.
+- **Filenames are resolved before similarity search** (`extract_file_references`).
+  Pure vector retrieval is close to useless for questions that name a file:
+  *"what is in assistant/stt.py?"* shares almost no vocabulary with the
+  contents of `stt.py`, and measurably returned **zero** chunks from that
+  file — the top-4 were `README.md`, `conftest.py`, `test_indexer.py` and
+  `test_stt.py`. The question is now scanned for filenames, any that exist
+  in the index are pulled in whole by metadata filter, and similarity hits
+  fill the remaining budget. This matters because two of the three example
+  questions in the project brief — *"Explain what this function does"*,
+  *"Generate a unit test for this file"* — are file-scoped by nature.
+- **A named file that is not indexed is reported as such.** Otherwise the
+  model answers "that is not in the excerpts", which is true, useless, and
+  indistinguishable from the file not existing.
 - **Cloud models are filtered out** (`llm._is_local`). An Ollama `*-cloud`
   model would send code off-device and invalidate the project's core claim.
 - **Ollama over HTTP** rather than the Python client: one less dependency and
@@ -70,6 +83,16 @@ streamlit run app.py
 The sidebar always shows **which folder the current index was built from**.
 If that line does not match the folder in the box, the answers are still
 coming from the previous project — press **Index project** to rebuild.
+
+The index is a snapshot, not a live view: a file created after the last
+index is invisible to the assistant until you re-index. The sidebar watches
+the folder and says *"Files have changed on disk since this index was
+built"* when that happens, so a missing file is never a silent failure.
+
+`samples/broken_function.py` is a deliberately broken file kept as a demo
+target — ask the assistant what is wrong with it. It lives outside `tests/`
+on purpose: pytest collects `tests/test_*.py` by importing them, so a syntax
+error in that directory aborts collection for the entire suite.
 
 ### Streamlit state, and why the folder box is written the way it is
 

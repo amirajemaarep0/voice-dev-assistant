@@ -43,6 +43,11 @@ CHUNK_SIZE = 900
 CHUNK_OVERLAP = 150
 TOP_K = 4
 
+# When a question names a file, that file's chunks are pulled in whole rather
+# than left to similarity search. Capped so a large file cannot crowd the
+# context window on its own.
+FILE_CHUNK_LIMIT = 8
+
 # Files worth indexing, mapped to the LangChain Language used for
 # syntax-aware splitting (None = plain recursive splitting).
 SOURCE_EXTENSIONS: dict[str, str | None] = {
