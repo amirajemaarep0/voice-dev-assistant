@@ -156,12 +156,32 @@ def build_prompt(
 # What to do with the deterministic findings, per task. The findings are
 # already correct; these say how to present them.
 TASK_INSTRUCTIONS = {
+    # Two variants, chosen by whether the tools actually found anything.
+    # A single instruction covering both branches has to name the clean
+    # outcome ("...may you say the file parses cleanly"), and a small model
+    # copies that phrase into an answer that has just reported an error.
+    # Never showing it the words is more reliable than forbidding them.
     "syntax": (
         "The syntax check above came from Python's own parser and is "
-        "authoritative. If it lists errors, report each one at the exact "
+        "authoritative: this file is BROKEN. Report each error at the exact "
         "line given, explain in one sentence why Python rejects it, and "
-        "show the corrected line - do NOT also say the file is fine. Only "
-        "if it reports no errors may you say the file parses cleanly."
+        "show the corrected line. End there. Do not add any closing "
+        "sentence about the file being valid, fine, or error-free."
+    ),
+    "syntax_clean": (
+        "The syntax check above came from Python's own parser and found no "
+        "errors. Say so in one sentence and stop. Do not invent problems "
+        "and do not speculate about what might be wrong."
+    ),
+    "health_clean": (
+        "The scan above found nothing. Say the project is clean in one "
+        "sentence. Do not invent findings."
+    ),
+    "testrun_clean": (
+        "The suite above was executed just now and every test passed. Say "
+        "it is green and quote the exact number of passing tests from the "
+        "report - copy those digits. Do not mention failures: there are "
+        "none."
     ),
     "health": (
         "The report above is a full scan of the project: Python's parser "
@@ -201,6 +221,19 @@ TASK_INSTRUCTIONS = {
 }
 
 
+def instruction_key(task: str, findings_clean: bool | None) -> str:
+    """Pick the task instruction, splitting clean and unclean outcomes.
+
+    Falls back to the plain task when there is no clean variant, or when
+    the pipeline could not tell (`None`).
+    """
+    if findings_clean:
+        clean = f"{task}_clean"
+        if clean in TASK_INSTRUCTIONS:
+            return clean
+    return task
+
+
 def build_prompt_for(context) -> str:
     """Assemble the prompt for a classified question.
 
@@ -212,7 +245,7 @@ def build_prompt_for(context) -> str:
         context.chunks,
         missing_files=context.missing_files,
         facts=context.facts,
-        task=context.intent.kind,
+        task=instruction_key(context.intent.kind, context.findings_clean),
     )
 
 

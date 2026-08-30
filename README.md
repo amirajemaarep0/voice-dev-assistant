@@ -202,11 +202,21 @@ citing a test that had nothing to do with the question.
 |---|---|
 | Tool findings **+ retrieved excerpts** (original) | 9 / 13 |
 | Tool findings **only** | 12 / 13 |
+| Tool findings only, **branch-specific instructions** | **13 / 13** |
 
-Reproduce with `python evaluate.py --with-excerpts` versus plain
-`python evaluate.py`. Retrieval still runs for questions that need it —
-explaining code and writing tests keep their excerpts; only the tasks whose
-answer is fully determined by tool output have them stripped.
+Reproduce the first two with `python evaluate.py --with-excerpts` versus
+plain `python evaluate.py`. Retrieval still runs for questions that need
+it — explaining code and writing tests keep their excerpts; only the tasks
+whose answer is fully determined by tool output have them stripped.
+
+The last row is a smaller but instructive fix. One instruction covering
+both outcomes had to describe the clean one — *"only if it reports no
+errors may you say the file parses cleanly"* — and the model copied that
+phrase into an answer that had just correctly reported a syntax error.
+There are now separate instructions for the clean and unclean branches,
+chosen from what the tools actually found, so the model never sees wording
+for an outcome that did not happen. **Not showing a small model the words
+is more reliable than forbidding them.**
 
 The project passes its own linter — the one it offers to run on your code:
 

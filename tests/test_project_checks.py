@@ -186,3 +186,63 @@ class TestFactsOnlyTasks:
         assert intents.EXPLAIN not in FACTS_ONLY
         assert intents.TEST not in FACTS_ONLY
         assert intents.GENERAL not in FACTS_ONLY
+
+
+class TestCleanBranchInstructions:
+    """A clean result and a broken one must get different instructions.
+
+    A single instruction covering both has to name the clean outcome, and a
+    small model then copies "the file parses cleanly" into an answer that
+    has just reported a syntax error - observed in evaluate.py.
+    """
+
+    def test_broken_file_is_flagged_unclean(self, indexed):
+        assistant, root = indexed
+        (root / "src" / "bad.py").write_text(BROKEN, encoding="utf-8")
+        build_index(root, assistant.store)
+        context = assistant.build_context("what is wrong with src/bad.py?")
+        assert context.findings_clean is False
+
+    def test_clean_file_is_flagged_clean(self, indexed):
+        assistant, _ = indexed
+        context = assistant.build_context("syntax errors in src/calc.py?")
+        assert context.findings_clean is True
+
+    def test_no_tool_run_leaves_it_unknown(self, indexed):
+        assistant, _ = indexed
+        context = assistant.build_context("how does this project work?")
+        assert context.findings_clean is None
+
+    def test_green_suite_is_clean(self, indexed):
+        assistant, root = indexed
+        (root / "test_demo.py").write_text(
+            "def test_demo():\n    assert True\n", encoding="utf-8"
+        )
+        assert assistant.build_context("run the tests").findings_clean is True
+
+    def test_red_suite_is_not_clean(self, indexed):
+        assistant, root = indexed
+        (root / "test_demo.py").write_text(
+            "def test_demo():\n    assert False\n", encoding="utf-8"
+        )
+        assert assistant.build_context("run the tests").findings_clean is False
+
+    def test_the_error_prompt_never_offers_the_clean_wording(self, indexed):
+        from assistant import llm
+
+        assistant, root = indexed
+        (root / "src" / "bad.py").write_text(BROKEN, encoding="utf-8")
+        build_index(root, assistant.store)
+        prompt = llm.build_prompt_for(
+            assistant.build_context("what is wrong with src/bad.py?")
+        )
+        assert "parses cleanly" not in prompt
+        assert "BROKEN" in prompt
+
+    def test_instruction_key_falls_back(self):
+        from assistant import llm
+
+        assert llm.instruction_key("explain", True) == "explain"
+        assert llm.instruction_key("syntax", True) == "syntax_clean"
+        assert llm.instruction_key("syntax", False) == "syntax"
+        assert llm.instruction_key("syntax", None) == "syntax"

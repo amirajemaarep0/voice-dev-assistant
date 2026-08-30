@@ -42,6 +42,11 @@ class Context:
     missing_files: list[str] = field(default_factory=list)
     facts: str = ""
     symbols: list[tools.Symbol] = field(default_factory=list)
+    # True when the tools ran and found nothing wrong, False when they
+    # found something, None when no tool ran. Selects which task
+    # instruction the model gets: telling it "say the file parses cleanly
+    # if there are no errors" makes it echo that phrase under an error.
+    findings_clean: bool | None = None
 
 
 @dataclass
@@ -117,10 +122,10 @@ class Assistant:
         """The project folder on disk, for tools that need real files."""
         return self.store.indexed_root
 
-    def _syntax_facts(self, named: list[str]) -> str:
+    def _syntax_facts(self, named: list[str]) -> tuple[str, bool | None]:
         """Run Python's own parser over the named files, or the whole tree."""
         if not self.root:
-            return ""
+            return "", None
         issues: list[tools.SyntaxIssue] = []
         checked: list[str] = []
 
@@ -139,15 +144,18 @@ class Assistant:
             checked = ["the whole project"]
 
         if not checked:
-            return ""
+            return "", None
         if not issues:
             return (
                 f"SYNTAX CHECK ({', '.join(checked)}): no syntax errors. "
                 "Every file parses with Python's own parser."
-            )
+            ), True
         body = "\n\n".join(i.as_text() for i in issues[:8])
         more = "" if len(issues) <= 8 else f"\n\n(+{len(issues) - 8} more)"
-        return f"SYNTAX CHECK - errors found by Python's parser:\n{body}{more}"
+        return (
+            f"SYNTAX CHECK - errors found by Python's parser:\n{body}{more}",
+            False,
+        )
 
     def _style_facts(self, named: list[str]) -> str:
         """Ask ruff what it would change, without changing anything."""
@@ -198,13 +206,15 @@ class Assistant:
                     )
         return ""
 
-    def _health_facts(self) -> str:
+    def _health_facts(self) -> tuple[str, bool | None]:
         """Everything statically wrong with the project, in one report."""
         if not self.root:
-            return ""
+            return "", None
         parts: list[str] = []
+        clean = True
 
         syntax = tools.check_project(self.root)
+        clean = clean and not syntax
         if syntax:
             body = "\n\n".join(i.as_text() for i in syntax[:8])
             more = "" if len(syntax) <= 8 else f"\n\n(+{len(syntax) - 8} more)"
@@ -216,6 +226,7 @@ class Assistant:
             parts.append("SYNTAX: every Python file in the project parses.")
 
         issues, available, error = tools.lint_project(self.root)
+        clean = clean and available and not issues
         if not available:
             parts.append(f"LINT: unavailable ({error})")
         elif issues:
@@ -225,13 +236,14 @@ class Assistant:
             )
         else:
             parts.append("LINT: ruff reports no findings.")
-        return "\n\n".join(parts)
+        return "\n\n".join(parts), clean
 
-    def _testrun_facts(self) -> str:
+    def _testrun_facts(self) -> tuple[str, bool | None]:
         """Actually run the suite - the only way to see a runtime error."""
         if not self.root:
-            return ""
-        return tools.run_tests(self.root).as_text()
+            return "", None
+        run = tools.run_tests(self.root)
+        return run.as_text(), run.is_green
 
     def build_context(self, question: str) -> Context:
         """Classify the question, then assemble exactly what it needs."""
@@ -240,13 +252,14 @@ class Assistant:
         named, _ = self.resolve_files(question)
 
         facts = ""
+        clean: bool | None = None
         symbols: list[tools.Symbol] = []
         if intent.kind == intents.SYNTAX:
-            facts = self._syntax_facts(named)
+            facts, clean = self._syntax_facts(named)
         elif intent.kind == intents.HEALTH:
-            facts = self._health_facts()
+            facts, clean = self._health_facts()
         elif intent.kind == intents.TESTRUN:
-            facts = self._testrun_facts()
+            facts, clean = self._testrun_facts()
         elif intent.kind == intents.STYLE:
             facts = self._style_facts(named)
         elif intent.needs_symbol and intent.symbol:
@@ -276,6 +289,7 @@ class Assistant:
             missing_files=missing,
             facts=facts,
             symbols=symbols,
+            findings_clean=clean,
         )
 
     def stream(self, question: str) -> tuple[list[Retrieved], Iterator[str]]:
